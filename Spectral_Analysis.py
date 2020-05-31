@@ -7,6 +7,10 @@ import spectral.io.envi as envi
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 
+import os.path
+from os import path
+ 
+## !-- need to install wxpython with : conda install -c anaconda wxpython --!
 
 def save_envi_image(Spec, filename)  :
     md = {'lines'  : Spec.shape[0],      
@@ -23,12 +27,22 @@ def spectrum_patch(spectrum, patch):
     height   = patch[3]
     return spectrum[origin_x: origin_x + width, origin_y: origin_y + height,:]
 
-def zoom_patch(image_view, patch):
-    center_x = (patch[0] + patch[2])//2
-    center_y = (patch[1] + patch[3])//2
-    patch_center = [center_x, center_y]
-    image_view.open_zoom(patch_center)
-    return image_view.open_zoom(patch_center)
+def zoom_patch(image_view, patch, title=''):
+    origin_x = patch[1]
+    origin_y = patch[0]
+    center_x     = (patch[0] + patch[2])//2
+    center_y     = (patch[1] + patch[3])//2
+    patch_center = np.array([center_x, center_y])
+    width        = patch[3]
+    height       = patch[2]
+
+    figure = plt.figure()
+    
+    
+    sliced_data = image_view.data_rgb[origin_x:origin_x+width,origin_y:origin_y+height,:]
+    plt.imshow(sliced_data, interpolation='nearest')
+    #print(_patch_view)
+    #return _patch_view
     
 def colorMatchFcn():
     cmf = np.array([400,2.214302E-02,2.452194E-03,1.096090E-01,
@@ -289,14 +303,21 @@ def spec_to_sRGB(spectrum, patch):
                  image_rgb[i,j,w] = pow(image_rgb[i,j,w], 1/2.4)
                  image_rgb[i,j,w] *= 1.055
                  image_rgb[i,j,w] -= 0.055
-         
     return image_rgb
 
+
 if __name__ == '__main__':    
-    file_path = 'C:/Users/Asus/anaconda3/'                                      ## should set the file path
-    filename = file_path + 'cube_envi32_Reflectance_Spat_3D_BinomFilt7.hdr'
-    img      = spy.envi.open(filename)
+    file_path = 'C:/Users/Asus/.spyder-py3/'                                      ## should set the file path
+    filename  = file_path + 'cube_envi32_Reflectance_Spat_3D_BinomFilt7.hdr'
+    rgb_image_filename = 'rgb_reconstruction.png'
+    rgb_image_path = file_path + rgb_image_filename
+    found_rgb = False
     
+    img       = spy.envi.open(filename)
+    found_rgb = path.exists(rgb_image_path)   
+
+    rgb_image = plt.imread(rgb_image_path)        
+        
     plt.close('all')
     
     NbLg, NbCol, NbWaves = img.nrows, img.ncols, img.nbands
@@ -316,7 +337,7 @@ if __name__ == '__main__':
     plt.title("A spectrum")
     plt.legend()
     
-    title = 'Reconstruction en rgb spectre filtrÃ©s en 700nm, 536nm et 436nm'
+    title = 'Reconstruction en rgb spectre filtrés en 700nm, 536nm et 436nm'
     
     rgb_reconstruction_view = spy.imshow(img, (150, 68, 18), title=title)
     
@@ -331,20 +352,25 @@ if __name__ == '__main__':
                         750,     393,     12,    12,     
                         174,     392,     30,    10])
     
-    patches_description = np.array([ "l'intÃ©gralitÃ© de l'image reconstruite",
+    patches_description = np.array([ "l'intégralité de l'image reconstruite",
                                      "jaune | la texture du canevas ??",
-                                     "jaune coolde l'Ã©glise",
+                                     "jaune coolde l'église",
                                      "2 jaune bleu des montagnes",
                                      "rouge vif tir canon",   
-                                     "rouge orangÃ© (mÃ©lange ?) toit de la porte",
-                                     "rouge orangÃ© petite maison en bas",
+                                     "rouge orangé (mélange ?) toit de la porte",
+                                     "rouge orangé petite maison en bas",
                                      "rouge noirci",
                                      "rouge"
                                     ])
     
     patches    = patches.reshape((len(patches)//4,4))
     
-    _rgb_reconstruction_view = spec_to_sRGB(SpecImg, patches[0])
+    if found_rgb == False:
+        _rgb_reconstruction = spec_to_sRGB(SpecImg, patches[0])
+        spy.save_rgb(rgb_image_filename, _rgb_reconstruction, format='png')
+        rgb_image      = spy.open_image(rgb_image_path)
+        
+    _rgb_reconstruction_view = spy.imshow(rgb_image, title = patches_description[0] + ' | CIE RGB', interpolation='none')
     
     for i in range(1,len(patches),1):
         patch = patches[i]
@@ -355,6 +381,7 @@ if __name__ == '__main__':
         #XYZ_patch = spec_to_XYZ(SpecImg, patch)
         #spy.imshow(XYZ_patch, title = patches_description[i] + ' | CIE XYZ', interpolation='none')
         
-        RGB_Patch = zoom_patch(_rgb_reconstruction_view,patch)
+        RGB_Patch_view = zoom_patch(_rgb_reconstruction_view,patch, title = patches_description[i])
+        #spy.save_rgb()
         #spy.imshow(RGB_Patch, title = patches_description[i] + ' | CIE RGB', interpolation='none')
         
