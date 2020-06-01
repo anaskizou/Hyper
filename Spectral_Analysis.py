@@ -9,8 +9,13 @@ from matplotlib import pyplot as plt
 
 import os.path
 from os import path
+
+import cv2 
  
 ## !-- need to install wxpython with : conda install -c anaconda wxpython --!
+## !-- need to install pyopengl --!
+## !-- need the modified spectral/clustering.py script --!
+
 
 def save_envi_image(Spec, filename)  :
     md = {'lines'  : Spec.shape[0],      
@@ -23,8 +28,8 @@ def save_envi_image(Spec, filename)  :
 def spectrum_patch(spectrum, patch):
     origin_x = patch[1]
     origin_y = patch[0]
-    width    = patch[2]
-    height   = patch[3]
+    width    = patch[3]
+    height   = patch[2]
     return spectrum[origin_x: origin_x + width, origin_y: origin_y + height,:]
 
 def zoom_patch(image_view, patch, title=''):
@@ -37,12 +42,12 @@ def zoom_patch(image_view, patch, title=''):
     height       = patch[2]
 
     figure = plt.figure()
-    
+    plt.title(title)
     
     sliced_data = image_view.data_rgb[origin_x:origin_x+width,origin_y:origin_y+height,:]
     plt.imshow(sliced_data, interpolation='nearest')
     #print(_patch_view)
-    #return _patch_view
+    return sliced_data
     
 def colorMatchFcn():
     cmf = np.array([400,2.214302E-02,2.452194E-03,1.096090E-01,
@@ -305,19 +310,94 @@ def spec_to_sRGB(spectrum, patch):
                  image_rgb[i,j,w] -= 0.055
     return image_rgb
 
+# Create a reference white a patch [455 , 188, 3, 4 ] present on the canon 
+# Convert the patch to XYZ 
+# return means XYZ vector
+
+def get_white_XYZ(spectrum):
+    patch = np.array([188, 455, 3, 4])
+    xyz_white_patch = spec_to_XYZ(spectrum,patch)
+    nrows      = xyz_white_patch.shape[0]
+    ncolumns   = xyz_white_patch.shape[1]
+    _x = _y = _z =0
+    for i in range(nrows):
+        for j in range(ncolumns):
+            _x += xyz_white_patch[i,j,0]
+            _y += xyz_white_patch[i,j,1]
+            _z += xyz_white_patch[i,j,2]
+    _x /= (ncolumns * nrows)
+    _y /= (ncolumns * nrows)
+    _z /= (ncolumns * nrows)
+    XYZ = np.array([_x, _y, _z])
+    return XYZ.reshape((3,1))
+
+def spec_to_Lab(spectrum, patch):
+    XYZ_patch = spec_to_XYZ(spectrum, patch)
+    print(XYZ_patch.shape)
+    XYZ       = np.zeros((3,1))
+    LAB       = np.zeros((3,1))
+    nrows      = XYZ_patch.shape[0]
+    ncolumns   = XYZ_patch.shape[1]
+    White_xyz = get_white_XYZ(spectrum)
+    image_LAB  = np.zeros((nrows,ncolumns,3))
+    print(image_LAB.shape)
+    x = y = z = 0
+    e = 216/24389
+    k = 24389/27
+    for i in range(nrows):
+        for j in range(ncolumns):
+            x = XYZ_patch[i,j,0]/White_xyz[0]
+            y = XYZ_patch[i,j,1]/White_xyz[1]
+            z = XYZ_patch[i,j,2]/White_xyz[2]
+            
+            f_x = f_y = f_z = 0
+            
+            if(x>e):
+                f_x = pow(x,3/2)
+            else:
+                f_x = (k * x + 16)/116
+            
+            if(y>e):
+                f_y = pow(y,3/2)
+            else:
+                f_y = (k * y + 16)/116
+                
+            if(z>e):
+                f_z = pow(z,3/2)
+            else:
+                f_z = (k * z + 16)/116
+            
+            L = 116 * f_y - 16
+            a = 500 * (f_x - f_y)
+            b = 200 * (f_y - f_z)
+            
+            image_LAB[i,j,0] = L
+            image_LAB[i,j,1] = a
+            image_LAB[i,j,2] = b
+            
+    return image_LAB
 
 if __name__ == '__main__':    
-    file_path = 'C:/Users/Asus/.spyder-py3/'                                      ## should set the file path
+    file_path = 'C:/Users/Asus/.spyder-py3/'  
+                                    ## should set the file path
     filename  = file_path + 'cube_envi32_Reflectance_Spat_3D_BinomFilt7.hdr'
     rgb_image_filename = 'rgb_reconstruction.png'
-    rgb_image_path = file_path + rgb_image_filename
-    found_rgb = False
+    xyz_image_filename = 'xyz_reconstruction.png'
+    lab_image_filename = 'lab_reconstruction.png'
+    
+    rgb_image_path     = file_path + rgb_image_filename
+    xyz_image_path     = file_path + xyz_image_filename
+    lab_image_path     = file_path + lab_image_filename
+    
+    found_rgb = path.exists(rgb_image_path)   
+    found_xyz = path.exists(xyz_image_path)   
+    found_lab = path.exists(lab_image_path)   
     
     img       = spy.envi.open(filename)
-    found_rgb = path.exists(rgb_image_path)   
 
-    rgb_image = plt.imread(rgb_image_path)        
-        
+    rgb_image = plt.imread(rgb_image_path)    
+    xyz_image =  lab_image = np.zeros((968,608,0,0))
+       
     plt.close('all')
     
     NbLg, NbCol, NbWaves = img.nrows, img.ncols, img.nbands
@@ -341,7 +421,7 @@ if __name__ == '__main__':
     
     rgb_reconstruction_view = spy.imshow(img, (150, 68, 18), title=title)
     
-    ## origin_x, origin_y, width, height
+    ## origin_y, origin_x, width, height
     patches = np.array([0,       0,       608,   968,
                         464,     306,     12,    12,
                         521,     203,     12,    20,     
@@ -365,16 +445,27 @@ if __name__ == '__main__':
     
     patches    = patches.reshape((len(patches)//4,4))
     
+    if found_xyz==False:
+        _xyz_reconstruction = spec_to_XYZ(SpecImg, patches[0])
+        spy.save_rgb(xyz_image_filename, _xyz_reconstruction, format='png')
+       
     if found_rgb == False:
         _rgb_reconstruction = spec_to_sRGB(SpecImg, patches[0])
         spy.save_rgb(rgb_image_filename, _rgb_reconstruction, format='png')
-        rgb_image      = spy.open_image(rgb_image_path)
+        rgb_image      = spy.open_image(rgb_image_path)        
+    
         
     _rgb_reconstruction_view = spy.imshow(rgb_image, title = patches_description[0] + ' | CIE RGB', interpolation='none')
     
+    first_RGB_Patch = np.array([])
+    first_spec_Patch = np.array([])
+    
+    # TODO: factor in a function, regroup all patches into one figure !
+    # TODO: principal components on spectral patches 
+    
     for i in range(1,len(patches),1):
         patch = patches[i]
-        #spec_patch = spectrum_patch(SpecImg,patch) 
+        spec_patch = spectrum_patch(SpecImg,patch) 
         #view_spec_patch = np.array(spec_patch, copy=True)  
         #spy.imshow(view_spec_patch)
         
@@ -382,6 +473,44 @@ if __name__ == '__main__':
         #spy.imshow(XYZ_patch, title = patches_description[i] + ' | CIE XYZ', interpolation='none')
         
         RGB_Patch_view = zoom_patch(_rgb_reconstruction_view,patch, title = patches_description[i])
+        if(i==1):
+            first_spec_Patch = np.array(spec_patch)
+            first_RGB_Patch = np.array(RGB_Patch_view)
+            XYZ_patch = spec_to_XYZ(SpecImg, patch)
         #spy.save_rgb()
         #spy.imshow(RGB_Patch, title = patches_description[i] + ' | CIE RGB', interpolation='none')
+    
+    first_RGB_Patch = spec_to_sRGB(SpecImg,patches[0])
+    
+    first_lab_patch = spec_to_Lab(SpecImg,patches[0])
+    spy.save_rgb(lab_image_filename, format='png')
+        
+    (m, c) = spy.kmeans(first_lab_patch, 5, 30, distance='L1')
+    (_m, _c) = spy.kmeans(first_lab_patch, 5, 30, distance='L2')
+    (__m, __c) = spy.kmeans(first_lab_patch, 5, 30, distance='L3')
+    
+    spy.imshow(first_lab_patch)
+    lab_patch_view = spy.imshow(first_lab_patch, classes= m, interpolation='nearest', stretch_all=False)
+    lab_patch_view.set_display_mode('overlay')
+    lab_patch_view.class_alpha = 0.5
+    
+    rgb_patch_view = spy.imshow(first_RGB_Patch, classes= _m, interpolation='nearest', stretch_all=False)
+    rgb_patch_view.set_display_mode('overlay')
+    rgb_patch_view.class_alpha = 0.1
+    
+    _rgb_patch_view = spy.imshow(first_RGB_Patch, classes= __m, interpolation='nearest', stretch_all=False)
+    _rgb_patch_view.set_display_mode('overlay')
+    _rgb_patch_view.class_alpha = 0.1
+    
+    
+    plt.figure()
+    for i in range(c.shape[0]):
+        plt.plot(c[i])
+        plt.plot(_c[i])
+    plt.grid()
+    #print(first_lab_patch)
+    #pc = spy.principal_components(first_spec_Patch)
+    #xdata = pc.transform(first_spec_Patch)
+    #w = spy.view_nd(xdata[:,:,:25])
+    
         
