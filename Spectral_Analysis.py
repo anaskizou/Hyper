@@ -410,7 +410,13 @@ def masstone_r_from_k_and_s(k,s):
         return 0
     else:
         return 1 + (k/s) - math.sqrt(pow((k/s),2) + (2 * k/s))
-        
+
+def mixture_r_from_k_and_s(k_w,s_w,k_c,s_c,c):
+    k_s_mix = ((1-c) * k_w + c * k_c) / ((1-c) * s_w + c * s_c)
+    if((pow(k_s_mix,2) + (2 * k_s_mix)) < 0):
+        return 1 + k_s_mix
+    r_inf   = 1 + k_s_mix - math.sqrt(pow(k_s_mix,2) + (2 * k_s_mix))
+    return r_inf
 
 if __name__ == '__main__':    
     file_path = 'C:/Users/Asus/.spyder-py3/'                ## should set the file path
@@ -750,23 +756,23 @@ if __name__ == '__main__':
             diff               =  (k_over_s_yellow[i] - k_over_s_mixture[i]) 
             s_lambda[i]        = ((1-_c)/_c) * (k_over_s_mixture[i] * (s_lambda_white - k_lambda_white[i])) / diff
             k_lambda[i]        = s_lambda[i]  * k_over_s_yellow[i]
-            predicted_r_inf[i] = masstone_r_from_k_and_s(k_lambda[i],s_lambda[i])
+            predicted_r_inf[i] = mixture_r_from_k_and_s(k_lambda_white[i],1,k_lambda[i],s_lambda[i],_c)
             predicted_r_m[i]   = saunderson_correction(predicted_r_inf[i],k_1)
-            EMS_euclidean[i]   = predicted_r_m[i] - SpecImg[316,478,i]
+            EMS_euclidean[i]   = predicted_r_m[i] - mixed_pixel_spec[i]
             _E                += pow(EMS_euclidean[i],2)
-        _E  /= r_m.shape[0]
+        _E  /= NbWaves
         _E  = math.sqrt(_E )
         EMS[w-1] = _E
         
         _predicted_r_m       = predicted_r_m.reshape((1,1,NbWaves))
-        angle                = spy.spectral_angles(_predicted_r_m, SpecImg[316,261,:].reshape((1,NbWaves)))
+        angle                = spy.msam(_predicted_r_m, SpecImg[316,261,:].reshape((1,NbWaves)))
         SPECTRAL_ANGLES[w-1] = angle 
         
         
         if( _E<lowest_EMS ):
             lowest_EMS = _E
             lowest_EMS_concentration = _c
-        if( angle<lowest_SPEC_ANGLE):
+        if( angle<=lowest_SPEC_ANGLE):
             lowest_SPEC_ANGLE = angle
             lowest_SPEC_ANGLE_concentr = _c
             
@@ -776,7 +782,7 @@ if __name__ == '__main__':
     ax.plot(c,SPECTRAL_ANGLES,label='Spectral angle')
     plt.xlabel("concentration c")
     plt.ylabel("distance")
-    plt.title("K/S ratio for the mixture ")
+    #plt.title("K/S ratio for the mixture ")
     plt.legend()
     plt.show() 
     
