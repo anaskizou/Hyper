@@ -10,6 +10,8 @@ from matplotlib import pyplot as plt
 import os.path
 from os import path
 
+import math
+
 import cv2 
  
 ## !-- need to install wxpython with : conda install -c anaconda wxpython --!
@@ -309,9 +311,6 @@ def spec_to_sRGB(spectrum, patch):
                  image_rgb[i,j,w] -= 0.055
     return image_rgb
 
-# Create a reference white a patch [455 , 188, 3, 4 ] present on the canon 
-# return means XYZ vector
-
 def get_white_XYZ(spectrum):
     patch = np.array([188, 455, 3, 4])
     xyz_white_patch = spec_to_XYZ(spectrum,patch)
@@ -375,6 +374,44 @@ def spec_to_Lab(spectrum, patch):
             
     return image_LAB
 
+##------------- kubelka munk helper functions 
+
+def saunderson_correction_inverse(r_m, k_1, k_2=0.4):
+    # r_m : la reflectance mesurée 
+    # k_1 : the first constant
+    # k_2 : between 0.4 and 0
+    r_inf = (r_m - k_1) / (1 - k_1 - k_2 + k_2 * r_m)	
+    return r_inf
+
+def saunderson_correction(r_inf, k_1, k_2=0.4):
+    r_m = k_1 + ((1-k_1)*(1-k_2)*r_inf)/(1-(k_2*r_inf))
+    return r_m
+
+def k_1_from_refraction_indices(n1, n2):
+    #n1		The index of refraction of the medium through which light arrives.  In
+    #		most cases, this medium will be air, so n1 should be very near 1.
+
+	#n2		The index of refraction of the medium at which light arrives.  In
+	#		most cases, this medium will be a film of paint (1.5).
+    k_1 = pow(((n2-n1)/(n1+n2)),2)	;
+    return k_1
+
+def k_over_s_from_masstone_r(r):
+    K_over_S = 0
+    
+    if r == 0:		                    # No light at all is reflected (avoid a division by 0)
+        K_over_S = math.inf				
+    else:			                    # Generic case, where some light is reflected
+        K_over_S = pow((1-r),2)/(2*r)	
+    return K_over_S
+
+def masstone_r_from_k_and_s(k,s):
+    if(s==0):
+        return 0
+    else:
+        return 1 + (k/s) - math.sqrt(pow((k/s),2) + (2 * k/s))
+        
+
 if __name__ == '__main__':    
     file_path = 'C:/Users/Asus/.spyder-py3/'                ## should set the file path
                                     
@@ -405,6 +442,9 @@ if __name__ == '__main__':
     NbLg, NbCol, NbWaves = img.nrows, img.ncols, img.nbands
     Wavelengths = np.array(img.bands.centers)
     SpecImg= np.array(img.load(), np.float32)
+    
+    """ ----------------------------------------------------------------------
+    
     
     spy.imshow(img,title="l'image en fausses couleurs")
         
@@ -585,6 +625,160 @@ if __name__ == '__main__':
     for i in range(_c.shape[0]):
         plt.plot(_c[i])
     plt.grid()
+    
+    ----------------------------------------------------------------------"""
+    
+    
+    #--------------Kubelka Munk model
+    # the white pixel on the canon is on the 456,189. We consider this pigment to be the white 
+    s_lambda_white    = 1    
+    
+    plt.imshow(rgb_image[456:457,189:190,:])
+    white_pixel_spec  = np.array(SpecImg[456,189,:]) 
+    
+    r_m               = np.array(white_pixel_spec) 
+    k_1               = k_1_from_refraction_indices(1,1.5)
+    
+    r_inf             = np.zeros(NbWaves)
+    k_lambda_white    = np.zeros(NbWaves)
+    
+    for i in range(NbWaves):
+        r_inf[i]          = saunderson_correction_inverse(r_m[i],k_1)
+        k_lambda_white[i] = k_over_s_from_masstone_r(r_inf[i])
+
+    
+    plt.figure()
+    plt.plot(Wavelengths,np.log(k_lambda_white))
+    plt.xlabel("Wavelength in nm")
+    plt.ylabel("log(K/S)")
+    plt.title("K/S ratio for the white paint")
+    plt.show()
+    
+    
+    ##-------------- Masstones ------------------
+    
+    # the yellow pixel masseton
+    plt.imshow(rgb_image[316:317,261:262,:])
+    yellow_pixel_spec  = np.array(SpecImg[316,261,:]) 
+    k_over_s_yellow    = np.zeros(NbWaves)
+    r_m                = np.array(yellow_pixel_spec)
+    
+    for i in range(r_m.shape[0]):
+        r_inf[i]          = saunderson_correction_inverse(r_m[i],k_1)
+        k_over_s_yellow[i]    = k_over_s_from_masstone_r(r_inf[i])
+    
+    plt.figure()
+    plt.plot(Wavelengths,np.log(k_over_s_yellow))
+    plt.xlabel("Wavelength in nm")
+    plt.ylabel("log(K/S)")
+    plt.title("K/S ratio for the yellow masstone")
+    plt.show()  
+    
+    # the red pixel masseton
+    plt.imshow(rgb_image[404:405,751:752,:])
+    red_pixel_spec  = np.array(SpecImg[404,751,:]) 
+    k_over_s_red       = np.zeros(NbWaves)
+    r_m                = np.array(red_pixel_spec)
+    
+    for i in range(r_m.shape[0]):
+        r_inf[i]          = saunderson_correction_inverse(r_m[i],k_1)
+        k_over_s_red[i]   = k_over_s_from_masstone_r(r_inf[i])
+    
+    plt.figure()
+    plt.plot(Wavelengths,np.log(k_over_s_red))
+    plt.xlabel("Wavelength in nm")
+    plt.ylabel("log(K/S)")
+    plt.title("K/S ratio for the red masstone")
+    plt.show()  
+    
+    plt.figure()
+    plt.plot(Wavelengths,np.log(k_over_s_red), 'r')
+    plt.plot(Wavelengths,np.log(k_lambda_white), 'w')
+    plt.plot(Wavelengths,np.log(k_over_s_yellow),'y')
+    ax = plt.gca()
+    ax.set_facecolor((0.8,0.8,0.8))
+    plt.xlabel("Wavelength in nm")
+    plt.ylabel("log(K/S)")
+    plt.title("K/S ratio for the red and white")
+    #plt.legend()
+    plt.show()
+
+    plt.figure()
+    plt.plot(Wavelengths,SpecImg[316,261,:])
+    plt.xlabel("Wavelength in nm")
+    plt.ylabel("reflectance")
+    plt.title("K/S ratio for the yellow masstone")
+    plt.show()  
+
+    ##-------------- Mixture two pigments ------------------
+    
+    # Suspected yellow and white mix pigments
+    # from mixture of yellow and white present on the pixel 316 478
+    mixed_pixel_spec           = np.array(SpecImg[316,478,:]) 
+    k_over_s_mixture           = np.zeros(NbWaves)
+    s_lambda                   = np.zeros(NbWaves)
+    k_lambda                   = np.zeros(NbWaves)
+    predicted_r_inf            = np.zeros(NbWaves)
+    predicted_r_m              = np.zeros(NbWaves)
+    EMS_euclidean              = np.zeros(NbWaves)
+    EMS                        = np.zeros(99)
+    SPECTRAL_ANGLES            = np.zeros(99)
+    c                          = np.zeros(99)
+    r_m                        = mixed_pixel_spec
+    lowest_EMS                 = math.inf
+    lowest_SPEC_ANGLE          = math.inf
+    lowest_SPEC_ANGLE_concentr = math.inf
+    lowest_EMS_concentration   = math.inf
+    
+    for i in range(r_m.shape[0]):
+        r_inf[i]               = saunderson_correction_inverse(r_m[i],k_1)
+        k_over_s_mixture[i]    = k_over_s_from_masstone_r(r_inf[i])
+    
+    plt.figure()
+    plt.plot(Wavelengths,np.log(k_over_s_mixture))
+    plt.xlabel("Wavelength in nm")
+    plt.ylabel("log(K/S)")
+    plt.title("K/S ratio for the mixture ")
+    plt.show() 
+    
+    # for each iteration consider a concentration c, starting from 0.1 to 0.9 
+    for w in range(1,100,1):
+        _E                     = 0
+        _c                     = w * 0.01
+        c[w-1]                 = _c
+        for i in range(NbWaves):
+            diff               =  (k_over_s_yellow[i] - k_over_s_mixture[i]) 
+            s_lambda[i]        = ((1-_c)/_c) * (k_over_s_mixture[i] * (s_lambda_white - k_lambda_white[i])) / diff
+            k_lambda[i]        = s_lambda[i]  * k_over_s_yellow[i]
+            predicted_r_inf[i] = masstone_r_from_k_and_s(k_lambda[i],s_lambda[i])
+            predicted_r_m[i]   = saunderson_correction(predicted_r_inf[i],k_1)
+            EMS_euclidean[i]   = predicted_r_m[i] - SpecImg[316,478,i]
+            _E                += pow(EMS_euclidean[i],2)
+        _E  /= r_m.shape[0]
+        _E  = math.sqrt(_E )
+        EMS[w-1] = _E
+        
+        _predicted_r_m       = predicted_r_m.reshape((1,1,NbWaves))
+        angle                = spy.spectral_angles(_predicted_r_m, SpecImg[316,261,:].reshape((1,NbWaves)))
+        SPECTRAL_ANGLES[w-1] = angle 
+        
+        
+        if( _E<lowest_EMS ):
+            lowest_EMS = _E
+            lowest_EMS_concentration = _c
+        if( angle<lowest_SPEC_ANGLE):
+            lowest_SPEC_ANGLE = angle
+            lowest_SPEC_ANGLE_concentr = _c
+            
+    plt.figure()
+    ax = plt.subplot(111)
+    ax.plot(c,EMS,label='RMSE')
+    ax.plot(c,SPECTRAL_ANGLES,label='Spectral angle')
+    plt.xlabel("concentration c")
+    plt.ylabel("distance")
+    plt.title("K/S ratio for the mixture ")
+    plt.legend()
+    plt.show() 
     
     
     """
